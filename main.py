@@ -56,8 +56,8 @@ class FileManager:
          hdr = self.fd.read(BLOCK_SIZE)
          if hdr[0:8] != MAGIC:
                 raise ValueError("Invalid index file format")
-         self.root_id = struct.unpack('>Q', hdr, 8)[0] # read root id
-         self.next_block_id = struct.unpack('>Q', hdr, 16)[0]
+         self.root_id = struct.unpack_from('>Q', hdr, 8)[0] # read root id
+         self.next_block_id = struct.unpack_from('>Q', hdr, 16)[0]
      
     def sync_header(self): # write the root id and next block id to the header block
         buf = bytearray(BLOCK_SIZE)
@@ -121,18 +121,22 @@ class BTreeNode:
         self.block_id = block_id
         self.parent_id = parent_id
         self.keys = keys or []
-        self.num_children = children or []
+        self.children = children or []
         self.values = values or []
 
     @classmethod
     def from_bytes(cls, data): # convert bytes to node
         bid, pid, nkeys = struct.unpack_from(cls.HEADER_FMT, data, 0)
         offset = struct.calcsize(cls.HEADER_FMT)
-        keys = list(struct.unpack_from('>Q'*MAX_KEYS, data, offset))
+        # fixed-format unpacking must combine '>' + 'Q'*N
+        fmt_keys = '>' + 'Q'*MAX_KEYS
+        keys = list(struct.unpack_from(fmt_keys, data, offset))
         offset += 8*MAX_KEYS
-        vals = list(struct.unpack_from('>Q'*MAX_KEYS, data, offset))
+        fmt_vals = '>' + 'Q'*MAX_KEYS
+        vals = list(struct.unpack_from(fmt_vals, data, offset))
         offset += 8*MAX_KEYS
-        ch = list(struct.unpack_from('>Q'*MAX_CHILDREN, data, offset))
+        fmt_ch = '>' + 'Q'*MAX_CHILDREN
+        ch = list(struct.unpack_from(fmt_ch, data, offset))
 
         # trim the keys and values to the number of keys
         keys = keys[:nkeys]
@@ -157,12 +161,12 @@ class BTreeNode:
 
         # pack the children
         for i in range(MAX_CHILDREN):
-            struct.pack_into('>Q', buf, offset, self.num_children[i] if i < len(self.num_children) else 0)
+            struct.pack_into('>Q', buf, offset, self.children[i] if i < len(self.children) else 0)
             offset += 8
         return bytes(buf)
     
     def is_leaf(self):
-        return len(self.num_children) == 0
+        return len(self.children) == 0
 
 """
     B-Tree class:
@@ -175,31 +179,31 @@ class BTreeNode:
     - (Example: project3 create test.idx)
     * insert
     - The first arugment after "insert" is assumed to be the name of the index file.
-    - If the file doesn't exist or isn't a valid index file, exit with an error.
+    - If the file doesn’t exist or isn’t a valid index file, exit with an error.
     - The next two arguments are the key and value, respectively and should be converted into unsigned integers which will them be inserted into the B-Tree.
     - (Example: project3 insert test.idx 15 100)
     * search
     - The first argument after "search" is assumed to be the name of the index file.
-    - If the file doesn't exist or isn't a valid index file, exit with an error.
+    - If the file doesn’t exist or isn’t a valid index file, exit with an error.
     - The next argument is assumed to be a key which is converted into an unsigned integer.
     - Search the index for the key and if it exists, print the key / value pair.
-    - If the key doesn't exist, print an error message.
+    - If the key doesn’t exist, print an error message.
     - (Example: project3 search test.idx 15)
     * load
     - The first argument after "load" is assumed to be the name of the index file.
-    - If the file doesn't exist or isn't a valid index file, exit with an error.
-    - The next argument is assumed to be the name of a csv file, if the file doesn't exist then exit with an error message.
+    - If the file doesn’t exist or isn’t a valid index file, exit with an error.
+    - The next argument is assumed to be the name of a csv file, if the file doesn’t exist then exit with an error message.
     - Each line of the file is a comma separated key / value pair.
     - Read the file, inserting each pair as above with the insert command.
     - (Example: project3 load test.idx input.csv)
     * print
     - The first argument after "print" is assumed to be the name of the index file.
-    - If the file doesn't exist or isn't a valid index file, exit with an error.
+    - If the file doesn’t exist or isn’t a valid index file, exit with an error.
     - Assuming the file exists, print every key / value pair in the index to standard output.
     - (Example: project3 print test.idx)
     * extract
     - The first argument after "extract" is assumed to be the name of the index file.
-    - If the file doesn't exist or isn't a valid index file, exit with an error.
+    - If the file doesn’t exist or isn’t a valid index file, exit with an error.
     - The second argument is the name of the file and if it exists, exit with an error.
     - (The file should remain unmodified.)
     - Save every key / value pair in the index as comma separated pairs to the file.
@@ -213,16 +217,18 @@ class BTree:
         if block_id == 0:
             return None
         node = self.bfile.read_node(block_id)
+        # find the first index where stored key ≥ search key
         i = 0
-
         while i < len(node.keys) and key > node.keys[i]:
             i += 1
-
-        if i < len(node.keys) and key > node.keys[i]:
+        # if equal, return it
+        if i < len(node.keys) and key == node.keys[i]:
             return node.values[i]
+        # if leaf, not found
         if node.is_leaf():
             return None
-        return self.search(node.num_children[i], key)
+        # otherwise descend
+        return self.search(node.children[i], key)
     
     def traverse(self, block_id, visit):
         if block_id == 0:
@@ -247,8 +253,8 @@ class BTree:
             root = BTreeNode(bid)
             root.keys, root.values = [key], [value]
             self.bfile.write_node(root)
-            self.bfile.root-id = bid
-            self.bfile.syn_header()
+            self.bfile.root_id = bid
+            self.bfile.sync_header()
             return
         
         root = self.bfile.read_node(self.bfile.root_id)
@@ -375,7 +381,7 @@ def main():
                 print(f"Error: {e}")
                 bfile = None
                 continue
-            tree = BTree(bfile)
+            btree = BTree(bfile)
             print(f"Opened index file: {fname}.")
 
         else:

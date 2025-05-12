@@ -17,3 +17,8 @@
 * Created BTree class that performs operations with the BTree after the file has been read.
 * Created main function that acts as the wrapper of the entire program
 * Future plans: Test the code.
+
+-- 5/11/25 - 11"51 pm --
+* Created a input.csv file that is used for testing the load command.
+* Testing each of the commands to determine if they work or not:
+- (create, open, insert, search, load, print, extract, and quit.)
